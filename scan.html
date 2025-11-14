@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>NHAM Camera Scanner</title>
+<style>
+  :root{
+    --green-1:#1fa775;
+    --green-2:#55d399;
+    --bg:#e9f4e8;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    font-family: Arial, Helvetica, sans-serif;
+    background:var(--bg);
+    color:#111;
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+  }
+
+  /* HEADER */
+  .header{
+    background: linear-gradient(to bottom,var(--green-1),var(--green-2));
+    padding:16px;
+    color:white;
+    display:flex;
+    align-items:center;
+    gap:12px;
+  }
+  .back{ color:white; text-decoration:none; font-size:20px; width:36px; display:inline-flex; align-items:center; justify-content:center }
+  .title{ font-weight:700; font-size:18px }
+
+  /* LAYOUT */
+  .wrap{
+    padding:12px;
+    margin-top:-8px; /* tuck under header */
+  }
+
+  /* CAMERA BOX */
+  .camera-stage{
+    position:relative;
+    width:100%;
+    max-width:420px;
+    margin:0 auto;
+    background:#ddd;
+    border-radius:18px;
+    overflow:hidden;
+    box-shadow:0 6px 18px rgba(0,0,0,0.12);
+  }
+  /* video fills container */
+  #video {
+    width:100%;
+    height:65vh;
+    object-fit:cover;
+    background:#111;
+    display:block;
+  }
+
+  /* scan overlay corners */
+  .overlay{
+    position:absolute;
+    inset:12% 8%;
+    pointer-events:none;
+  }
+  .corner{
+    position:absolute;
+    width:44px;height:44px;border:4px solid var(--green-1); border-radius:6px;
+    box-sizing:border-box;
+  }
+  .corner.tl{ left:0; top:0; border-right:none; border-bottom:none; }
+  .corner.tr{ right:0; top:0; border-left:none; border-bottom:none; }
+  .corner.bl{ left:0; bottom:0; border-right:none; border-top:none; }
+  .corner.br{ right:0; bottom:0; border-left:none; border-top:none; }
+
+  /* controls area */
+  .controls{
+    display:flex;
+    gap:10px;
+    justify-content:center;
+    align-items:center;
+    padding:12px;
+    background:linear-gradient(180deg, rgba(0,0,0,0.02), transparent);
+  }
+  .btn{
+    background:white;
+    border:none;
+    padding:10px 14px;
+    border-radius:12px;
+    box-shadow:0 3px 8px rgba(0,0,0,0.12);
+    font-weight:700;
+    cursor:pointer;
+  }
+  .btn.primary{
+    background:linear-gradient(90deg,var(--green-1),var(--green-2));
+    color:white;
+    padding:12px 20px;
+    border-radius:18px;
+  }
+  .small{
+    font-size:13px;
+    padding:8px 10px;
+  }
+
+  /* preview modal */
+  .preview {
+    display:none;
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.6);
+    align-items:center;
+    justify-content:center;
+    z-index:40;
+    padding:20px;
+  }
+  .preview .card{
+    background:white;
+    border-radius:14px;
+    padding:12px;
+    max-width:420px;
+    width:100%;
+    box-shadow:0 10px 30px rgba(0,0,0,0.3);
+  }
+  .preview img{
+    width:100%;
+    border-radius:10px;
+    display:block;
+  }
+  .preview .actions{ display:flex; gap:8px; margin-top:10px; justify-content:flex-end }
+
+  /* helper text row */
+  .hint { text-align:center; font-size:13px; color:#2f6b47; margin:10px 0 6px }
+
+  /* responsive tweaks */
+  @media (min-width:600px){
+    #video{ height:64vh }
+    .overlay{ inset:10% 10% }
+  }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <a class="back" href="tracking.html" title="Back">←</a>
+  <div class="title">NHAM Scan</div>
+</header>
+
+<div class="wrap">
+  <div class="camera-stage" id="stage">
+
+    <!-- LIVE VIDEO -->
+    <video id="video" autoplay playsinline></video>
+
+    <!-- overlay frame -->
+    <div class="overlay" aria-hidden="true">
+      <div class="corner tl"></div>
+      <div class="corner tr"></div>
+      <div class="corner bl"></div>
+      <div class="corner br"></div>
+    </div>
+  </div>
+
+  <div class="controls" style="margin-top:12px; max-width:420px; margin-left:auto; margin-right:auto;">
+    <button id="btnSwitch" class="btn small" title="Switch camera">Switch</button>
+    <button id="btnTorch" class="btn small" title="Toggle torch">Torch</button>
+    <button id="btnCapture" class="btn primary" title="Capture">Capture</button>
+    <button id="btnUpload" class="btn small">Upload</button>
+  </div>
+
+  <div class="hint">Frame the food inside the green corners and press Capture</div>
+</div>
+
+<!-- hidden file input fallback -->
+<input id="fileInput" type="file" accept="image/*" style="display:none" />
+
+<!-- Preview modal -->
+<div id="previewModal" class="preview" role="dialog" aria-modal="true">
+  <div class="card">
+    <img id="previewImg" src="" alt="Captured preview">
+    <div class="actions">
+      <button id="downloadBtn" class="btn small">Download</button>
+      <button id="useBtn" class="btn small">Use in Food Input</button>
+      <button id="closePreview" class="btn small">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Elements
+  const video = document.getElementById('video');
+  const btnSwitch = document.getElementById('btnSwitch');
+  const btnTorch = document.getElementById('btnTorch');
+  const btnCapture = document.getElementById('btnCapture');
+  const fileInput = document.getElementById('fileInput');
+  const btnUpload = document.getElementById('btnUpload');
+
+  const previewModal = document.getElementById('previewModal');
+  const previewImg = document.getElementById('previewImg');
+  const closePreview = document.getElementById('closePreview');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const useBtn = document.getElementById('useBtn');
+
+  // State
+  let currentStream = null;
+  let useFacingMode = 'environment'; // 'environment' or 'user'
+  let videoTrack = null;
+  let torchOn = false;
+  let deviceIds = []; // all video input deviceIds
+  let currentDeviceIndex = -1;
+
+  // helper: stop old stream
+  function stopStream() {
+    if (currentStream) {
+      currentStream.getTracks().forEach(t => t.stop());
+      currentStream = null;
+      videoTrack = null;
+    }
+  }
+
+  // enumerate video input devices (to support explicit device switching)
+  async function enumerateCameras(){
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      deviceIds = devices.filter(d => d.kind === 'videoinput').map(d=>({id:d.deviceId,label:d.label}));
+    } catch(e){
+      deviceIds = [];
+      console.warn('enumerateDevices failed', e);
+    }
+  }
+
+  // start camera with constraints
+  async function startCamera(constraints = {}) {
+    stopStream();
+    try {
+      currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = currentStream;
+      videoTrack = currentStream.getVideoTracks()[0];
+      // update currentDeviceIndex if possible
+      try {
+        const settings = videoTrack.getSettings();
+        if (settings && settings.deviceId) {
+          const idx = deviceIds.findIndex(d=>d.id===settings.deviceId);
+          if (idx>=0) currentDeviceIndex = idx;
+        }
+      } catch(e){}
+      // if torch was on, try to set it off (fresh start)
+      torchOn = false;
+      updateTorchButton();
+    } catch (err) {
+      console.error('getUserMedia error', err);
+      alert('Camera access denied or not available. Use Upload to pick an image.');
+    }
+  }
+
+  // initial startup
+  async function init() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert('Your browser does not support camera access.');
+      return;
+    }
+    await enumerateCameras();
+    // prefer deviceId if available; fallback to facingMode
+    if (deviceIds.length>0) {
+      // try to pick a device whose label includes 'back' or 'rear' (best-effort)
+      const backIdx = deviceIds.findIndex(d=>/back|rear|environment/i.test(d.label));
+      currentDeviceIndex = backIdx>=0 ? backIdx : 0;
+      await startCamera({ video: { deviceId: { exact: deviceIds[currentDeviceIndex].id } , width: { ideal: 1280 }, height: { ideal: 1280 } } , audio: false});
+    } else {
+      // fallback: use facingMode
+      await startCamera({ video: { facingMode: useFacingMode } , audio: false });
+    }
+  }
+
+  // toggle between cameras
+  btnSwitch.addEventListener('click', async () => {
+    // if multiple devices known, cycle
+    if (deviceIds.length>1) {
+      currentDeviceIndex = (currentDeviceIndex + 1) % deviceIds.length;
+      await startCamera({ video: { deviceId: { exact: deviceIds[currentDeviceIndex].id } , width: { ideal: 1280 } } , audio: false });
+      return;
+    }
+    // else toggle using facingMode
+    useFacingMode = useFacingMode === 'environment' ? 'user' : 'environment';
+    await startCamera({ video: { facingMode: useFacingMode } , audio: false });
+  });
+
+  // attempt to toggle torch (only works if supported by device)
+  async function setTorch(on) {
+    if (!videoTrack) return false;
+    try {
+      const imageCapture = new ImageCapture(videoTrack);
+      const capabilities = await imageCapture.getPhotoCapabilities();
+      // some browsers expose torch via getCapabilities on track
+      const trackCap = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+      if ('torch' in trackCap) {
+        await videoTrack.applyConstraints({ advanced: [{ torch: on }] });
+        torchOn = on;
+        updateTorchButton();
+        return true;
+      } else if (capabilities && capabilities.fillLightMode && capabilities.fillLightMode.length) {
+        // fallback, can't programmatically set
+        console.warn('device supports fillLightMode but torch not controllable here');
+        return false;
+      } else {
+        return false;
+      }
+    } catch (e) {
+      console.warn('torch toggle failed', e);
+      return false;
+    }
+  }
+
+  btnTorch.addEventListener('click', async () => {
+    const ok = await setTorch(!torchOn);
+    if (!ok) {
+      // graceful fallback: inform user
+      alert('Torch not supported on this device/browser.');
+    }
+  });
+
+  function updateTorchButton(){
+    btnTorch.textContent = torchOn ? 'Torch: On' : 'Torch';
+  }
+
+  // capture frame -> canvas -> dataURL
+  btnCapture.addEventListener('click', () => {
+    if (!currentStream) { alert('Camera not ready'); return; }
+    const videoSettings = video.getBoundingClientRect();
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (!w || !h) {
+      alert('Video not ready. Try again.');
+      return;
+    }
+    // capture full video resolution canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    // draw current frame
+    ctx.drawImage(video, 0, 0, w, h);
+    // convert to data URL (jpeg)
+    canvas.toBlob(function(blob){
+      const url = URL.createObjectURL(blob);
+      showPreview(url, blob);
+    }, 'image/jpeg', 0.92);
+  });
+
+  // fallback upload
+  btnUpload.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (ev)=>{
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    showPreview(url, f);
+  });
+
+  // show preview modal, enable download and use
+  function showPreview(objectUrl, blob){
+    previewImg.src = objectUrl;
+    previewModal.style.display = 'flex';
+
+    // prepare download link (create temporary anchor)
+    downloadBtn.onclick = () => {
+      // create an anchor and download
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = 'nham_scan.jpg';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    };
+
+    // use in Food Input: save to localStorage as data URL, then redirect
+    useBtn.onclick = async () => {
+      try {
+        // convert blob to dataURL
+        const dataUrl = await blobToDataURL(blob);
+        // save small size (compress) optional — here saved as is
+        localStorage.setItem('scannedImage', dataUrl);
+        // redirect to food_input page (your page should read localStorage key 'scannedImage')
+        window.location.href = 'food_input.html';
+      } catch (e) {
+        console.error(e);
+        alert('Could not save image.');
+      }
+    };
+  }
+
+  closePreview.addEventListener('click', ()=>{
+    previewModal.style.display = 'none';
+    // revoke object URL to free memory
+    if (previewImg.src.startsWith('blob:')) URL.revokeObjectURL(previewImg.src);
+    previewImg.src = '';
+  });
+
+  // helper: blob -> dataURL
+  function blobToDataURL(blob){
+    return new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = rej;
+      fr.readAsDataURL(blob);
+    });
+  }
+
+  // auto-start when page loaded
+  (async ()=>{
+    await init();
+    // keep enumerating devices periodically (improves device labels in some browsers)
+    try {
+      setTimeout(()=>enumerateCameras(), 1000);
+    } catch(e){}
+  })();
+
+  // stop camera on page unload
+  window.addEventListener('pagehide', ()=> stopStream());
+  window.addEventListener('beforeunload', ()=> stopStream());
+</script>
+</body>
+</html>
